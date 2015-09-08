@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <title></title>
+    <link rel="stylesheet" type="text/css" href="css/bootstrap.css"/>
+    <link rel="stylesheet" type="text/css" href="css/bootstrap-datetimepicker.min.css"/>
+    <style type="text/css">
+        .axis path,.axis line {fill: none;stroke:#b6b6b6;shape-rendering: crispEdges;}
+        /*.tick line{fill:none;stroke:none;}*/
+        .tick text{fill:#999;}
+        div.tooltip {
+            position: absolute;
+            text-align: center;
+            padding: 5px;
+            background: #FFFFCC;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="row"><h2 style="text-align: center">Statuses by Config </h2></div>
+<div class="row"><h4 style="text-align: center"> In the last six hours</h4></div>
+
+<div class="row">
+    <div class='col-md-1'></div>
+    <div class='col-md-3'><p>From</p></div>
+    <div class='col-md-3'><p>To</p></div>
+</div>
+
+<div class="row">
+    <div class='col-md-1'></div>
+    <div class="input-daterange" id="datepicker">
+        <div class='col-md-3'><input type='text' class="form-control" id='startdate' /></div>
+        <div class='col-md-3'><input type='text' class="form-control" id='enddate' /></div>
+        <div class='col-md-1'><input type="button" id="submitdate" style="vertical-align: middle" value="apply date"></div>
+        <div class="col-md-1"><a class="reset" href="javascript:initial();" style="vertical-align: middle;text-align: left">reset</a></div>
+    </div>
+</div>
+
+<div class="row">
+    <div id="bubble"></div>
+</div>
+
+<script type="text/javascript" src="js/d3.js"></script>
+<script type="text/javascript" src="js/crossfilter.js"></script>
+<script type="text/javascript" src="js/binary_parser.js"></script>
+<script type="text/javascript" src="js/objectid.js"></script>
+<script type="text/javascript" src="js/jquery.js"></script>
+<script type="text/javascript" src="js/moment.js"></script>
+<script type="text/javascript" src="js/bootstrap.js"></script>
+<script type="text/javascript" src="js/bootstrap-datetimepicker.js"></script>
+<script type="text/javascript">
+    $(document).ready(function(){
+        $('#startdate').datetimepicker();
+        $('#enddate').datetimepicker();
+        $("#startdate").on("dp.change", function (e) {
+            $('#enddate').data("DateTimePicker").minDate(e.date);
+        });
+        $("#enddate").on("dp.change", function (e) {
+            $('#startdate').data("DateTimePicker").maxDate(e.date);
+        });
+
+        $('#submitdate').click(function(){
+            var startd=new Date($('#startdate').val()).getTime();
+            var endd=new Date($('#enddate').val()).getTime();
+            var config=GetUrlValue('config');
+            crud(config,startd,endd);
+        });
+    });
+
+    var url="http://etapapi.int.thomsonreuters.com";
+    var margin = {top: 20, right: 20, bottom: 0, left: 80};
+    var width = 1600, height = 10000;
+    //c for colors, s for statuses, dateFormat for parsing date
+    var c={"OK":d3.rgb("#70AD47"),"Failed":d3.rgb("#C00"),"Inconclusive":d3.rgb("#8a8a8a")};
+    var s={"OK":0,"Failed":1,"Inconclusive":5};
+    var dateFormat = d3.time.format("%Y-%m-%d %H:%M:%S");
+    //define x scale
+    var x = d3.time.scale()
+            .range([0, width]);
+    //define x axis properties
+    var xAxis = d3.svg.axis()
+            .scale(x)
+            .orient("top")
+            .ticks(d3.time.hours, 1);
+    //add svg
+    var svg = d3.select("#bubble").append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .style("margin-left", margin.left + "px")
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+    initial();
+
+    function initial(){
+        //by default for the last 6 hours
+        var now=new Date().getTime();
+        var sevenDaysAgo=new Date();
+        var seven=sevenDaysAgo.getTime()-3600000*6;
+        var config=GetUrlValue('config');
+        crud(config,seven,now);
+    }
+
+    //get configid(VarSearch) from url input
+    function GetUrlValue(VarSearch){
+        var adresse = window.location;
+        var SearchString = adresse.search.substring(1);
+        var VariableArray = SearchString.split('&');
+        for(var i = 0; i < VariableArray.length; i++){
+            var KeyValuePair = VariableArray[i].split('=');
+            if(KeyValuePair[0] == VarSearch){
+                return KeyValuePair[1];
+            }
+        }
+    }
+
+    function crud(config,start,end) {
+        var xmlhttp=new XMLHttpRequest();
+        xmlhttp.onreadystatechange=function(){
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var mydata=JSON.parse(xmlhttp.responseText);
+                draw(mydata);
+            }
+        };
+        xmlhttp.open("POST", url+"/administer/crud");
+        xmlhttp.setRequestHeader("Content-Type", "application/json");
+        xmlhttp.setRequestHeader("Accept","application/json, text/plain");
+        //from collection statuses, query statuses matching config input
+        var payload = {"table":"statuses",
+            "search":{"$and":[{"configID":config} ,{"testStatus":{"$exists":true}},{"kind":{"$ne":"overridden"}},{"statusTimestamp":{"$gt":start}},{"statusTimestamp":{"$lt":end}}]},//kind not overridden to filter unnecessary statuses
+            "projection":{"_id":1,"executionID":1,"testID":1,"testStatus":1},//executionID contains timestamp
+            "action":"list"};
+        xmlhttp.send(JSON.stringify(payload));
+    }
+
+    function draw(data){
+        d3.select("g").selectAll("*").remove();
+        //get time from executionID
+        data.forEach(function(d){
+            var oid=new ObjectID(d.executionID);
+            d.time=oid.getTimestamp().getTime();
+        });
+        var ndx=crossfilter(data);
+        var dateDim=ndx.dimension(function(d){ return d.time;});
+        var start = dateDim.bottom(1)[0].time;
+        var end = dateDim.top(1)[0].time;
+        //restructure the data into key as testID and value as{testID,index,[executions]} where executions=[time,status]
+        //index is for deciding the position of paths and ticks
+        var tests={};
+        var listtestid=[];
+        var i=0;
+        data.forEach(function(d){
+            if(!(d.testID in tests)){
+                tests[d.testID]={testID:d.testID, executions:[], index:i};
+                //listtestid.push([i,d.testID]);
+                listtestid.push(d.testID);
+                i++;
+            }
+            tests[d.testID].executions.push([d.time, d.testStatus, d.executionID, d._id]);
+        });
+        data=tests;
+        x.domain([start, end]);
+        var xScale = d3.time.scale()
+                .domain([start, end])
+                .range([0, width]);
+        //g element of x axis
+        svg.append("g")
+                .attr("class", "x axis")
+                .attr("transform", "translate(0," + 0 + ")")
+                .call(xAxis);
+        //j as key as testID
+        for (var j in data) {
+            var object=data[j];
+            //g element for the content of graph
+            var g = svg.append("g").attr("class","test");
+            // append shapes for elements in executions array
+            var points= g.selectAll(".point")
+                    .data(object.executions)
+                    .enter()
+                    .append("path");
+            // append text for each element
+            var text = g.selectAll("text")
+                    .data(object.executions)
+                    .enter()
+                    .append("text");
+            //add tooltip
+            var div = d3.select("body").append("div")
+                    .attr("class", "tooltip")
+                    .style("opacity", 0);
+            //define point type, position, color and mousever event
+            var frame= g.selectAll("rect")
+                    .attr("class","blueframe")
+                    .data([object.testID])
+                    .enter()
+                    .append("rect");
+            var symbol=d3.svg.symbol();
+            points
+                    .attr("class", "point")
+                    .attr("d", symbol.type(function(d) {return d3.svg.symbolTypes[s[d[1]]];}))
+                    .attr("transform", function(d) { return "translate(" + xScale(d[0]) + "," + (object.index*30+20) + ")"; })
+                    .style("fill", function(d) { return c[d[1]]; })
+
+                    .on("mouseover", function(d){
+                        var g=d3.select(this).node().parentNode;
+                        d3.select(g).selectAll(".point").each(function(d,i){
+                            var elt = d3.select(this);
+                            elt.style({"stroke":c[d[1]],"stroke-width":3})
+                        });
+                        frame.transition()
+                                .duration(200)
+                                .attr("x",-15)
+                                .attr("y",(d3.event.pageY- 200))
+                                //.attr("y",(function(d){return listtestid.indexOf(d)*30+25}))
+                                .attr("width",width+40)
+                                .attr("height",25)
+                                .style({"fill": "none","stroke-width": 1,"stroke": 'lightblue',"opacity": 1});
+                        div.transition()
+                                .duration(200)
+                                .style("opacity", .9);
+                        div.html(function(){
+                            var date=new Date(d[0]);
+                            date=dateFormat(date);
+                            return [date,d[1]].join("\n");})
+                                .style("left", (d3.event.pageX) + "px")
+                                .style("top", (d3.event.pageY - 22) + "px");
+                    })
+                    .on("mouseout", function(d) {
+                        var g=d3.select(this).node().parentNode;
+                        d3.select(g).selectAll(".point").style({"stroke":"white","stroke-width":0});
+
+                        d3.select(g).selectAll(".frame").style("opacity", 0);
+                        div.transition()
+                                .duration(500)
+                                .style("opacity", 0);
+                    })
+                    .on("click", function (d) {
+                        window.location="https://compass.thomsonreuters.com/test/#/run/"+d[2]+"/"+d[3];
+                    });
+            text
+                    .attr("y", object.index*30+25)
+                    .attr("x",function(d, i) { return xScale(d[0])-5; })
+                    .attr("class","value")
+                    .text(function(d){ return d[1]; })
+                    .style("display","none");
+            //add labels on the left
+        }
+
+        var g2 = svg.append("g").attr("class","label");
+        var labels=g2.selectAll("text")
+                .data(listtestid)
+                .enter()
+                .append("text");
+        labels
+                .attr("y",function(d) {return listtestid.indexOf(d)*30+25;})
+                .attr("x",-80)
+                .attr("class","label")
+                .text(function(d){return d.substr(0, 10) + "\u2026";})
+                .on("mouseover", function(d){
+                    var g = d3.select(this).node().parentNode;
+                    d3.select(g).selectAll("circle").style("display","none");
+                    d3.select(g).selectAll("text.value").style("display","block");
+                    div.transition()
+                            .duration(200)
+                            .style("opacity", .9);
+                    div .html(d)
+                            .style("left", (d3.event.pageX -20) + "px")
+                            .style("top", (d3.event.pageY - 50) + "px");
+                })
+                .on("mouseout", function(d) {
+                    var g = d3.select(this).node().parentNode;
+                    d3.select(g).selectAll("circle").style("display","block");
+                    d3.select(g).selectAll("text.value").style("display","none");
+                    div.transition()
+                            .duration(500)
+                            .style("opacity", 0);
+                });
+    }
+
+</script>
+
+</body>
+</html>

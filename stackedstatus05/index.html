@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+    <link rel="stylesheet" type="text/css" href="css/dc.css"/>
+    <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="css/datepicker.css">
+    <link rel="stylesheet" type="text/css" href="css/color.css">
+</head>
+<body>
+<div class="row">
+    <div class="col-md-12">
+        <h2 style="text-align:center;">Stacked Execution Statuses by configuration </h2>
+    </div>
+</div>
+<div class="row">
+    <div class="col-md-12">
+        <h4 style="text-align:center;">Default set: for the last 7 days </h4>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4"></div>
+    <div class="col-md-3">
+        <div class="input-daterange" id="datepicker" >
+            <span class="add-on" style="vertical-align: top;height:26px">from</span>
+            <input type="text" class="input-small" id="startdate">
+            <span class="add-on" style="vertical-align: top;height:26px">to</span>
+            <input type="text" class="input-small" id="enddate">
+        </div>
+    </div>
+    <div class="col-md-4">
+        <input type="button" id="submitdate" value="apply date">
+    </div>
+    <div class="col-md-1">
+        <a class="reset" href="javascript:initial();">reset</a>
+    </div>
+</div>
+<div class="row">
+    <div id="chart"></div>
+</div>
+<div class="row">
+    <div id="zoom"></div>
+</div>
+<div id="response"></div>
+
+<script type="text/javascript" src="js/d3.js"></script>
+<script type="text/javascript" src="js/crossfilter.js"></script>
+<script type="text/javascript" src="js/dc.js"></script>
+<script type="text/javascript" src="js/jquery.js"></script>
+<script type="text/javascript" src="js/bootstrap.min.js"></script>
+<script type="text/javascript" src="js/bootstrap-datepicker.js"></script>
+<script type="text/javascript">
+    $(document).ready(function(){
+        $('.input-daterange').datepicker({
+            todayBtn: "linked"
+        });
+        $('#submitdate').click(function(){
+            var startd=new Date($('#startdate').val()).getTime();
+            var endd=new Date($('#enddate').val()).getTime();
+            var config=GetUrlValue('config');
+            crud(config,startd,endd);
+        });
+    });
+
+    var url="http://etapapi.int.thomsonreuters.com";
+    initial();
+
+    function initial(){
+        var config=GetUrlValue('config');
+        var now=new Date().getTime();
+        var sevenDaysAgo=new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() -7);
+        var seven=sevenDaysAgo.getTime();
+        crud(config,seven,now);
+    }
+
+    function GetUrlValue(VarSearch){
+        var SearchString = window.location.search.substring(1);
+        var VariableArray = SearchString.split('&');
+        for(var i = 0; i < VariableArray.length; i++){
+            var KeyValuePair = VariableArray[i].split('=');
+            if(KeyValuePair[0] == VarSearch){
+                return KeyValuePair[1];
+            }
+        }
+    }
+
+    function crud(config,start,end) {
+        var xmlhttp=new XMLHttpRequest();
+        xmlhttp.onreadystatechange=function(){
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var mydata=JSON.parse(xmlhttp.responseText);
+                draw(mydata,config,0,0);
+            }
+        };
+        xmlhttp.open("POST", url+"/administer/crud");
+        xmlhttp.setRequestHeader("Content-Type", "application/json");
+        xmlhttp.setRequestHeader("Accept","application/json, text/plain");
+        var payload = {"table":"execution",
+            "search":{"$and":[{"config.id":config},{"startTimestamp":{"$gt":start}},{"startTimestamp":{"$lt":end}}]},
+            "projection":{"startTimestamp":1,"ok":1,"failed":1,"missing":1,"partial":1,"inconclusive":1},
+            "action":"list"};
+        xmlhttp.send(JSON.stringify(payload));
+    }
+
+    function draw(data,config,start,end){
+        if (data!=0){
+            var ndx = crossfilter(data);
+            data.forEach(function (d) {
+                d.date = new Date(d.startTimestamp);
+            });
+
+            var configDim=ndx.dimension(function(d){return d.configId;});
+            configDim.filter(config);
+            var dateDim=ndx.dimension(function(d){return d.date;});
+            var maxDate = dateDim.top(1)[0].date;
+            var minDate = dateDim.bottom(1)[0].date;
+            if(start!=0&&end!=0){
+                maxDate=end;
+                minDate=start;
+                dateDim.filter([minDate,maxDate]);
+            }
+            var Group=dateDim.group().reduce(
+                    function (p,v){
+                        p.ok+= v.ok;
+                        p.failed+= v.failed;
+                        p.inconclusive+= v.inconclusive;
+                        p.partial+= v.partial;
+                        p.missing+= v.missing;
+                        p._id+= v._id;
+                        return p;
+                    },
+                    function (p,v){
+                        p.ok-= v.ok;
+                        p.failed-= v.failed;
+                        p.inconclusive-= v.inconclusive;
+                        p.partial-= v.partial;
+                        p.missing-= v.missing;
+                        p._id-= v._id;
+                        return p;
+                    },
+                    function(){
+                        return {
+                            ok:0,
+                            failed:0,
+                            inconclusive:0,
+                            partial:0,
+                            missing:0,
+                            _id:""
+                        };
+                    }
+            );
+            var chart=dc.barChart("#chart");
+            var zoomchart=dc.barChart("#zoom");
+            chart
+                    .width(1900)
+                    .height(100)
+                    .margins({top: 20, right: 50, bottom: 30, left: 40})
+                    .x(d3.time.scale().domain([minDate, maxDate]))
+                    .elasticY(true)
+                    .dimension(dateDim)
+                    .group(Group,"Failed")
+                    .valueAccessor(function(d){return d.value.failed;})
+                    .renderHorizontalGridLines(true)
+                    .renderVerticalGridLines(true)
+                    .stack(Group,"Missing",function(d){return d.value.missing;})
+                    .stack(Group,"Inconclusive",function(d){return d.value.inconclusive;})
+                    .stack(Group,"Partial",function(d){return d.value.partial;})
+                    .stack(Group,"Ok",function(d){return d.value.ok;})
+                    .brushOn(true);
+            chart.yAxis().ticks(2);
+            chart.render();
+
+            zoomchart
+                    .width(1900)
+                    .height(400)
+                    .transitionDuration(1000)
+                    .margins({top: 30, right: 50, bottom: 50, left: 40})
+                    .xAxisLabel('Time')
+                    .dimension(dateDim)
+                    .legend(dc.legend().x(1700).y(10).itemHeight(10).gap(5))
+                    .rangeChart(chart)
+                    .x(d3.time.scale().domain([minDate, maxDate]))
+                    .elasticY(true)
+                    .xUnits(d3.time.minutes)
+                    .brushOn(false)
+                    .group(Group,"Failed")
+                    .valueAccessor(function(d){return d.value.failed;})
+                    .renderHorizontalGridLines(true)
+                    .renderVerticalGridLines(true)
+                    .stack(Group,"Missing",function(d){return d.value.missing;})
+                    .stack(Group,"Inconclusive",function(d){return d.value.inconclusive;})
+                    .stack(Group,"Partial",function(d){return d.value.partial;})
+                    .stack(Group,"Ok",function(d){return d.value.ok;})
+                    .on("renderlet", function(d){return d.value.config;})
+                    .title(function (d) {
+                        var whole=new Date(d.key);
+                        var date=whole.toLocaleDateString();
+                        var time=whole.toLocaleTimeString();
+                        return date + " "+time+ '\n' + "Ok: "+ d.value.ok +'\n'  + "Inconclusive: "+ d.value.inconclusive+'\n'  + "Failed: "+ d.value.failed;
+                    })
+                    .renderTitle(true);
+
+            zoomchart.on("renderlet", function(zoomchart){
+                zoomchart.selectAll("rect.bar").on("click", function (d) {
+                    var exe=d.data.value._id;
+                    window.location="https://compass.thomsonreuters.com/test/#/run/"+exe;
+                })
+            });
+            zoomchart.render();
+        }else{
+            alert("no data for selected criteres")
+        }
+    }
+</script>
+</body>
+</html>

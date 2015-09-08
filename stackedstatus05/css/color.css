@@ -1,0 +1,48 @@
+#zoom g.stack._0 > rect.bar, #chart g.stack._0 > rect.bar {
+    stroke: none;
+    fill: #C00;
+}
+
+#zoom g.stack._1 > rect.bar, #chart g.stack._1 > rect.bar {
+    stroke: none;
+    fill: #8e5dbd;
+}
+
+#zoom g.stack._2 > rect.bar, #chart g.stack._2 > rect.bar {
+    stroke: none;
+    fill: #8a8a8a;
+}
+#zoom  g.stack._3 > rect.bar, #chart  g.stack._3 > rect.bar {
+    stroke: none;
+    fill: #ff8000;
+}
+#zoom g.stack._4 > rect.bar, #chart g.stack._4 > rect.bar {
+    stroke: none;
+    fill: #70AD47;
+}
+
+#zoom g.dc-legend-item:nth-child(1) >  rect:nth-child(1), #chart g.dc-legend-item:nth-child(1) >  rect:nth-child(1){
+    stroke: none;
+    fill: #C00;
+}
+
+#zoom g.dc-legend-item:nth-child(2) > rect:nth-child(1) , #chart g.dc-legend-item:nth-child(2)> rect:nth-child(1){
+    stroke: none;
+    fill: #8e5dbd;
+}
+
+#zoom g.dc-legend-item:nth-child(3) > rect:nth-child(1),#chart g.dc-legend-item:nth-child(3)> rect:nth-child(1) {
+    stroke: none;
+    fill: #8a8a8a;
+}
+
+#zoom g.dc-legend-item:nth-child(4)> rect:nth-child(1) ,#chart g.dc-legend-item:nth-child(4) > rect:nth-child(1){
+    stroke: none;
+    fill: #ff8000;
+}
+
+#zoom g.dc-legend-item:nth-child(5) > rect:nth-child(1),#chart g.dc-legend-item:nth-child(5) > rect:nth-child(1){
+    stroke: none;
+    fill: #70AD47;
+}
+
