@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template Performance</title>
+    <link href="css/bootstrap.css" rel="stylesheet">
+    <link href="css/dashboard.css" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="css/dc.css"/>
+    <link rel="stylesheet" href="css/datepicker.css">
+    <link rel="stylesheet" href="css/better-autocomplete.css" />
+</head>
+<body>
+<nav class="navbar navbar-inverse navbar-fixed-top">
+    <div class="container-fluid">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="#">CTA Report</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-sm-3 col-md-2 sidebar">
+            <div class="form-group">
+                <label for="clouddropdown">Cloud</label><br />
+                <select class="form-control" id="clouddropdown">
+                    <option value="All">All</option>
+                </select>
+            </div>
+            <div class="form-group" >
+                <label for="startdate">From</label><br/>
+                <div class="input-group date">
+                    <input type="text" id="startdate" class="form-control" style="border-radius: 4px">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="enddate">To</label><br/>
+                <div class="input-group date">
+                    <input type="text" id="enddate" class="form-control" style="border-radius: 4px">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="template">Search</label><br />
+                <input type="search" id="template" name="template" placeholder="Template Name" style="width:100%;height:34px;border: 1px solid #ccc;border-radius: 4px"/>
+            </div>
+            <div class="form-group">
+                <input type="search" id="instance" name="instance" placeholder="Instance Name" style="width:100%;height:34px;border: 1px solid #ccc;border-radius: 4px"/>
+            </div>
+            <button id="submitfilter" type="submit" class="btn btn-success btn-lg">Filter</button>
+            <button id="reset" type="submit" class="btn btn-info btn-lg">Reset</button>
+        </div>
+        <div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+            <h1 id="head" class="page-header">Daily Execution </h1>
+            <div class="table-responsive">
+                <table id="table" class="tablesorter table table-hover">
+                    <thead>
+                    <tr id="tablehead">
+                        <th>Template Name</th>
+                        <th>Template Id</th>
+                        <th>Cloud</th>
+                        <th>Chart</th>
+                        <th>Total Executions</th>
+                    </tr>
+                    </thead>
+                    <tbody id="chart"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<script type="text/javascript" src="js/d3.js"></script>
+<script type="text/javascript" src="js/crossfilter.js"></script>
+<script type="text/javascript" src="js/dc.js"></script>
+<script type="text/javascript" src="js/jquery.js"></script>
+<script type="text/javascript" src="js/bootstrap.js"></script>
+<script src="js/bootstrap-datepicker.js"></script>
+<script src="js/jquery.better-autocomplete.js"></script>
+<script src="js/jquery.tablesorter.js"></script>
+
+<script type="text/javascript">
+    $(document).ready(function(){
+        $('#startdate').datepicker({});
+        $('#enddate').datepicker({});
+        $('#template').betterAutocomplete('init', templatesearchlist, { autoHighlight: false }, {
+            highlight: function(result, $input, trigger) {
+                if (trigger == 'key')
+                    $input.val(result.title)
+            }
+        });
+        $('#instance').betterAutocomplete('init', allhost, { autoHighlight: false }, {
+            highlight: function(result, $input, trigger) {
+                if (trigger == 'key')
+                    $input.val(result.title)
+            }
+        });
+        $('#submitfilter').click(function() {
+            filter();
+        });
+
+        $("#clouddropdown").change(function(){filter();});
+        $("#reset").click(function(){
+           document.getElementById("startdate").value="";
+           document.getElementById("enddate").value="";
+           document.getElementById("template").value="";
+            document.getElementById("tablehead").innerHTML="<th>Template Name</th> <th>Template Id</th> <th>Cloud</th> <th>Chart</th> <th>Total Executions</th>";
+            clear();
+            init();
+
+        });
+    });
+
+    var url="http://etapapi.int.thomsonreuters.com";
+    var dateFormat = d3.time.format("%Y-%m-%d");
+    var templatesearchlist=[];
+    var cloudlist=[];
+    var templateidlist=[];
+    var cloudlistobject={};
+    var listnameonetemp=[];
+    var allhost=[];
+    var allhostid=[];
+    init();
+
+
+    function filter() {
+        clear();
+        var selectedcloud = $('#clouddropdown option:selected').text();
+        var startd = new Date($('#startdate').val()).getTime();
+        var endd = new Date($('#enddate').val()).getTime();
+        var template = document.getElementById('template').value;
+        var instance = document.getElementById('instance').value;
+        //if date not chosen, set to default
+        if (isNaN(startd) || isNaN(endd)) {
+            endd = new Date().getTime();
+            var now = new Date();
+            startd = now.getTime() - 3600000 * 24 * 7;
+        }
+        //if template not chosen check region
+        if (template == "") {
+            if(instance==""){
+            //draw all template
+            if (selectedcloud == "All") {
+                clear();
+                for (var i = 0; i < templateidlist.length; i++) {
+                    crud1(templateidlist[i][1], startd, endd, i);
+                }
+            } else {
+                //draw templates in one region
+                clear();
+                var templateArray = cloudlistobject[selectedcloud].listTemplates;
+
+                for (var m = 0; m < templateArray.length; m++) {
+                    var k = templateArray[m];
+                    crud1(templateidlist[k][1], startd, endd, k);
+                }
+            }
+            }else{
+                //instance not null search for exact host
+               // window.location=window.location.href+"?instance="+instance;
+                clear();
+                crud2([instance],startd,endd,allhost.indexOf(instance),-2)
+            }
+        } else {
+            var indexArray = $.map(templatesearchlist, function (elementOfArray, indexInArray) {
+                return elementOfArray == template ? indexInArray : null;
+            });
+            if(selectedcloud == "All"){
+                clear();
+                for (m = 0; m < indexArray.length; m++) {
+                    k = indexArray[m];
+                    crud1(templateidlist[k][1], startd, endd, k);
+                }
+            }else{
+                clear();
+                for (m = 0; m < indexArray.length; m++) {
+                    k = indexArray[m];
+                    if(templateidlist[k][2]==selectedcloud){
+                        crud1(templateidlist[k][1], startd, endd, k);
+                    }
+                }
+            }
+        }
+    }
+    //clean table body for updating
+    function clear(){
+        var div = document.getElementById('chart');
+        while(div.firstChild){
+            div.removeChild(div.firstChild);
+        }
+    }
+
+    function init(){
+        clear();
+        var now=new Date().getTime();
+        var DaysAgo=new Date();
+        var seven=DaysAgo.getTime()-3600000*24*7;
+        $("#table").tablesorter();
+        var template=GetUrlValue('templateid');
+        //var instance=GetUrlValue('instance');
+        if(template==null){
+            crud0(seven,now);
+        }else{
+            crud1(template,seven,now,-1);
+        }
+    }
+    //all templates
+    function crud0(start,end) {
+        var xmlhttp=new XMLHttpRequest();
+        xmlhttp.onreadystatechange=function(){
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var templatelist= JSON.parse(xmlhttp.responseText);
+                for(var i=0;i<templatelist.length;i++){
+                    templatesearchlist.push(templatelist[i].name);
+                    var cloud=templatelist[i].cloud.name;
+                    // if(cloudlist.indexOf(cloud)==-1){cloudlist.push(cloud);}
+                    //use autocomplete
+                    if($.inArray(cloud,cloudlist)==-1){
+                        cloudlist.push(cloud);
+                    }
+                    //use button or select
+                    if(!(cloud in cloudlistobject)){
+                        cloudlistobject[cloud]={
+                            cloudname:cloud,
+                            listTemplates:[i]
+                        };
+                    }else{
+                        cloudlistobject[cloud].listTemplates.push(i);//templatelist[i]._id
+                    }
+                    templateidlist.push([templatelist[i].name,templatelist[i]._id,templatelist[i].cloud.name]);
+                    crud1(templatelist[i]._id,start,end,i);
+                }
+
+                for (cloud in cloudlistobject){
+                    //dropdown list
+                    var opt = document.createElement('option');
+                    opt.value=cloud;
+                    opt.innerHTML=cloud;
+                    document.getElementById("clouddropdown").appendChild(opt);
+                }
+            }
+        };
+        xmlhttp.open("POST", url+"/administer/crud");
+        xmlhttp.setRequestHeader("Content-Type", "application/json");
+        xmlhttp.setRequestHeader("Accept","application/json, text/plain");
+        var payload1 = {"table":"instanceTemplate",
+            "projection":{"_id":1,"name":1,"cloud.name":1},
+            "action":"list"};
+        xmlhttp.send(JSON.stringify(payload1));
+    }
+    // list of instances for each template
+    function crud1(templateid,start,end,i) {
+        var xmlhttp=new XMLHttpRequest();
+        xmlhttp.onreadystatechange=function(){
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var listinstance=JSON.parse(xmlhttp.responseText);
+                if(i!=-1){
+                    var listname=[];
+                    for(var j= 0;j<listinstance.length;j++){
+                        listname.push(listinstance[j].hostName);
+                        allhost.push(listinstance[j].hostName);
+                        allhostid.push([listinstance[j].hostName,listinstance[j]._id]);
+                    }
+                    crud2(listname,start,end,i,1);
+                }else{
+                    var title=document.getElementById("head");
+                    title.innerHTML=listinstance[0].cloud_data.image.name;
+                    for(var j= 0;j<listinstance.length;j++){
+                        listnameonetemp.push([listinstance[j].hostName,listinstance[j]._id]);
+                        crud2([listinstance[j].hostName],start,end,j,-1);
+                    }
+                }
+            }
+        };
+        xmlhttp.open("POST", url+"/administer/crud");
+        xmlhttp.setRequestHeader("Content-Type", "application/json");
+        xmlhttp.setRequestHeader("Accept","application/json, text/plain");
+        var payload1 = {"table":"instance",
+            "search":{"$and":[{"cloud_data.image._id":templateid}]},//"cloud_data.image.templateid":"3c4a30dc-be31-48f4-beb7-ec7c86dff879"//////use _id instaed:"551bb4a16899919c2f3801b4"
+            "projection":{"hostName":1,"cloud_data.image.name":1},
+            "action":"list"};
+        xmlhttp.send(JSON.stringify(payload1));
+    }
+    //executions for a instance list(one template)
+    function crud2(listname,start,end,i,m) {
+        var xmlhttp=new XMLHttpRequest();
+        xmlhttp.onreadystatechange=function(){
+            if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                var mydata=JSON.parse(xmlhttp.responseText);
+                if (mydata.length!=0) {
+                    draw(mydata, i,m);
+                }
+            }
+        };
+        xmlhttp.open("POST", url+"/administer/crud");
+        xmlhttp.setRequestHeader("Content-Type", "application/json");
+        xmlhttp.setRequestHeader("Accept","application/json, text/plain");
+        var payload2 = {"table":"execution",
+            "search":{"$and":[
+                {"hostNames.name":{"$in":listname}},//["monitoring54","monitoring55","us1o-ctbi02-02","monitoring50","monitoring51"]
+                {"startTimestamp":{"$gt":start}},
+                {"startTimestamp":{"$lt":end}}
+            ]},
+            "projection":{"startTimestamp":1,"hostNames.name":1,"hostNames.instance_id":1},
+            "action":"list"};
+        xmlhttp.send(JSON.stringify(payload2));
+    }
+    // add row content and draw graph
+    function draw(data,k,m){
+
+        var row = document.createElement("tr");
+        row.setAttribute("id", "row" + k);
+        var colname = document.createElement("td");
+        var colid = document.createElement("td");
+        var colcloud = document.createElement("td");
+        var colchart = document.createElement("td");
+        var colcount = document.createElement("td");
+        var divchart = document.createElement("div");
+        var a = document.createElement("a");
+        divchart.setAttribute('id', 'chart' + k);
+        if(m==1){
+            //var href=window.opener.location.href;
+        a.href=window.location.href+"?templateid="+templateidlist[k][1];
+        a.target="_blank";
+           // colname.onclick=window.open(window.location.href);
+        a.innerHTML=templateidlist[k][0];
+
+        colname.appendChild(a);
+        colid.innerHTML=templateidlist[k][1];
+        colcloud.innerHTML=templateidlist[k][2];
+        colchart.appendChild(divchart);
+        colcount.innerHTML=data.length;
+        row.appendChild(colname);
+        row.appendChild(colid);
+        row.appendChild(colcloud);
+        row.appendChild(colchart);
+        row.appendChild(colcount);
+        document.getElementById("chart").appendChild(row);
+    }else if(m==-1){
+
+            var table=document.getElementById("tablehead");
+            table.innerHTML="<th>Instance Name</th> <th>Instance Id</th> <th>Chart</th> <th>Total Executions</th> ";
+        colname.innerHTML=listnameonetemp[k][0];
+        colid.innerHTML=listnameonetemp[k][1];
+        colchart.appendChild(divchart);
+        colcount.innerHTML=data.length;
+        row.appendChild(colname);
+        row.appendChild(colid);
+        row.appendChild(colchart);
+        row.appendChild(colcount);
+        document.getElementById("chart").appendChild(row);
+    }else if(m==-2){
+            var table=document.getElementById("tablehead");
+            table.innerHTML="<th>Instance Name</th> <th>Instance Id</th> <th>Chart</th> <th>Total Executions</th> ";
+            colname.innerHTML=allhostid[k][0];
+            colid.innerHTML=allhostid[k][1];
+            colchart.appendChild(divchart);
+            colcount.innerHTML=data.length;
+            row.appendChild(colname);
+            row.appendChild(colid);
+            row.appendChild(colchart);
+            row.appendChild(colcount);
+            document.getElementById("chart").appendChild(row);
+        }
+        //update tablesorter after adding a new row
+        var sorting = [[0,0]];
+        $("#table").trigger("update")
+                .trigger("sorton",[sorting]);
+        data.forEach(function (d) {
+            var time = new Date(d.startTimestamp);
+            time.setHours(0,0,0,0);
+            d.date=new Date(time);
+        });
+        var ndx = crossfilter(data);
+        var dateDim=ndx.dimension(function(d){
+            return d.date;
+        });
+        var maxDate = dateDim.top(1)[0].date;
+        var minDate = dateDim.bottom(1)[0].date;
+        var group=dateDim.group().reduceCount();
+        var chart = dc.lineChart("#chart"+k);
+        //draw the chart
+        chart
+                .width(400)
+                .height(250)
+                .margins({top: 50, right: 20, bottom: 40, left: 40})
+                .transitionDuration(500)
+                .interpolate('linear')
+                .defined(function(d){return d.y != 0;})
+                .brushOn(false)
+                .dimension(dateDim)
+                .group(group)
+                .x(d3.time.scale().domain([minDate, maxDate]))
+                .xUnits(d3.time.days)
+                .round(d3.time.day.round)
+                .elasticX(true)
+                .xAxisPadding(1)
+                .elasticY(true)
+                .yAxisPadding("5%")
+                .renderHorizontalGridLines(true)
+                .renderTitle(true)
+                .title(function (d) {
+                    return dateFormat(d.key)+" Count: "+ d.value;
+                })
+                .yAxisLabel("Daily Execution Number")
+                .keyAccessor(function(d) { return d.key; })
+                .valueAccessor(function(d) {return d.value});
+        chart.xAxis().tickFormat(d3.time. format('%x'))
+                .ticks(4);
+        chart.on('renderlet', function(chart){
+            chart.selectAll('g.x text')
+                    .attr('transform', 'translate(-10,10) rotate(330)');
+        });
+        chart.yAxis().ticks(5);
+        dc.renderAll();
+    }
+
+    //get configid(VarSearch) from url input
+    function GetUrlValue(VarSearch){
+        var adresse = window.location;
+        var SearchString = adresse.search.substring(1);
+        var VariableArray = SearchString.split('&');
+        for(var i = 0; i < VariableArray.length; i++){
+            var KeyValuePair = VariableArray[i].split('=');
+            if(KeyValuePair[0] == VarSearch){
+                return KeyValuePair[1];
+            }
+        }
+    }
+</script>
+
+</body>
+</html>
